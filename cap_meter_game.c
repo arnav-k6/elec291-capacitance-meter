@@ -1,6 +1,3 @@
-// ================= CAP METER + AUDIO =================
-//  ~C51~
-
 #include <EFM8LB1.h>
 #include <stdio.h>
 
@@ -22,74 +19,16 @@
 
 unsigned char overflow_count;
 
+void UART0_Init(void);
+void UART_putc(char c);
+void UART_print(char code *s);
+bit  UART_guess_poll(unsigned long *out);
+
 bit cap_close_enough(unsigned int guess, unsigned int actual)
 {
 	if(actual == 0) return 0;
 	if(guess > actual) return (guess - actual) <= GUESS_TOL_X100UF;
 	return (actual - guess) <= GUESS_TOL_X100UF;
-}
-
-void UART0_Init(void)
-{
-	P0MDOUT |= 0x10;
-	XBR0 |= 0x01;
-
-	SCON0 = 0x10;
-	CKCON0 &= ~0x0B;
-
-	TH1 = 0x100 - ((SYSCLK/BAUDRATE)/(2L*12L));
-	TL1 = TH1;
-
-	TMOD &= ~0xF0;
-	TMOD |=  0x20;
-
-	TR1 = 1;
-	TI = 1;
-}
-
-static void putchar_uart0(char c)
-{
-	SBUF = c;
-	while(!TI);
-	TI = 0;
-}
-
-static char getchar_uart0(void)
-{
-	while(!RI);
-	RI = 0;
-	return SBUF;
-}
-
-void UART_print(char code *s)
-{
-	while(*s) putchar_uart0(*s++);
-}
-
-unsigned long get_ulong_from_putty(void)
-{
-	unsigned long v = 0;
-	char c;
-
-	while(1)
-	{
-		c = getchar_uart0();
-
-		if(c == '\r' || c == '\n')
-		{
-			putchar_uart0('\r');
-			putchar_uart0('\n');
-			break;
-		}
-
-		if(c >= '0' && c <= '9')
-		{
-			putchar_uart0(c);
-			v = (v * 10UL) + (unsigned long)(c - '0');
-		}
-	}
-
-	return v;
 }
 
 char _c51_external_startup (void)
@@ -112,7 +51,6 @@ char _c51_external_startup (void)
 	CLKSEL = 0x03;
 	while ((CLKSEL & 0x80) == 0);
 
-	P0MDOUT |= 0x10;
 	P1MDOUT |= 0b_10001111;
 	P2MDOUT |= 0b_00000011;
 
@@ -255,6 +193,64 @@ void play_tone(unsigned int freq)
 	}
 }
 
+void UART0_Init(void)
+{
+	P0MDOUT |= 0x10;
+	XBR0 |= 0x01;
+
+	SCON0 = 0x10;
+	CKCON0 &= ~0x0B;
+
+	TH1 = 0x100 - ((SYSCLK/BAUDRATE)/(2L*12L));
+	TL1 = TH1;
+
+	TMOD &= ~0xF0;
+	TMOD |=  0x20;
+
+	TR1 = 1;
+	TI = 1;
+}
+
+void UART_putc(char c)
+{
+	SBUF = c;
+	while(!TI);
+	TI = 0;
+}
+
+void UART_print(char code *s)
+{
+	while(*s) UART_putc(*s++);
+}
+
+bit UART_guess_poll(unsigned long *out)
+{
+	static unsigned long v = 0;
+	char c;
+
+	while(RI)
+	{
+		c = SBUF;
+		RI = 0;
+
+		if(c == '\r' || c == '\n')
+		{
+			UART_putc('\r');
+			UART_putc('\n');
+			*out = v;
+			v = 0;
+			return 1;
+		}
+
+		if(c >= '0' && c <= '9')
+		{
+			UART_putc(c);
+			v = (v * 10UL) + (unsigned long)(c - '0');
+		}
+	}
+	return 0;
+}
+
 void main(void)
 {
 	char line1[17];
@@ -265,14 +261,14 @@ void main(void)
 	unsigned int whole;
 	unsigned int decimal;
 
+	static bit game_started = 0;
 	static bit waiting_for_new_cap = 0;
 	static unsigned int last_correct_cap = 0;
+	static bit prompted = 0;
+	static unsigned long guess_x100 = 0;
 
 	LCD_4BIT();
 	UART0_Init();
-
-	UART_print("\r\n=== Cap Guess Game ===\r\n");
-	UART_print("Type guess as integer (uF x100). Example 0.47uF -> 47\r\n\r\n");
 
 	while(1)
 	{
@@ -297,34 +293,49 @@ void main(void)
 		LCDprint(line1,1);
 		LCDprint(line2,2);
 
-		if((f != 0) && (c_uf_x100 != 0))
+		if(!game_started)
 		{
-			if(waiting_for_new_cap)
+			UART_print("\r\n=== Cap Guess Game ===\r\n");
+			UART_print("Enter guess as integer (uF x100). Example 0.47uF -> 47\r\n\r\n");
+			game_started = 1;
+		}
+
+		if((f == 0) || (c_uf_x100 == 0))
+		{
+			prompted = 0;
+			continue;
+		}
+
+		if(waiting_for_new_cap)
+		{
+			if((c_uf_x100 != last_correct_cap) && (c_uf_x100 != 0))
 			{
-				if((c_uf_x100 != last_correct_cap) && (c_uf_x100 != 0))
-				{
-					waiting_for_new_cap = 0;
-					UART_print("New capacitor detected.\r\n");
-				}
+				waiting_for_new_cap = 0;
+				prompted = 0;
+				UART_print("New capacitor detected.\r\n");
 			}
+			continue;
+		}
 
-			if(!waiting_for_new_cap)
+		if(!prompted)
+		{
+			UART_print("Your guess (uF x100): ");
+			prompted = 1;
+		}
+
+		if(UART_guess_poll(&guess_x100))
+		{
+			prompted = 0;
+
+			if(cap_close_enough((unsigned int)guess_x100, c_uf_x100))
 			{
-				unsigned long guess_x100;
-
-				UART_print("Your guess (uF x100): ");
-				guess_x100 = get_ulong_from_putty();
-
-				if(cap_close_enough((unsigned int)guess_x100, c_uf_x100))
-				{
-					UART_print("Correct! Change capacitor to play again.\r\n\r\n");
-					last_correct_cap = c_uf_x100;
-					waiting_for_new_cap = 1;
-				}
-				else
-				{
-					UART_print("You are a genius!\r\n\r\n");
-				}
+				UART_print("Correct! Change capacitor to play again.\r\n\r\n");
+				last_correct_cap = c_uf_x100;
+				waiting_for_new_cap = 1;
+			}
+			else
+			{
+				UART_print("You are a genius!\r\n\r\n");
 			}
 		}
 	}
