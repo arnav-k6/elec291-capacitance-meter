@@ -15,7 +15,7 @@
 
 #define BTN_NF_PIN 6
 #define BTN_F_PIN  7
-#define BTN_UF_PIN 5   // moved from PB0 to PB5 (pin 28)
+#define BTN_UF_PIN 5 
 
 #define MODE_UF 0
 #define MODE_NF 1
@@ -31,11 +31,9 @@
 #define SCREEN_OHM 1
 #define SCREEN_IND 2
 
-#define IND_TOGGLE_BTN_PIN 13   // keep your existing toggle button assignment
+#define IND_TOGGLE_BTN_PIN 13   
 
-// New inductance measurement method:
-// PB4 (pin 27) = GPIO drive
-// PB0 (pin 14) = ADC input at junction of L and R
+
 #define IND_DRIVE_PIN      4
 #define IND_ADC_PIN        0
 #define IND_ADC_CHANNEL    8
@@ -292,22 +290,18 @@ unsigned long measure_resistance_ohms(void)
 	return (unsigned long)rx;
 }
 
-// RL step-response inductance measurement
-// Wiring:
-// PB4 -> unknown inductor -> junction -> 1k resistor -> GND
-//                              |
-//                              +-> PB0 ADC input
+
 unsigned long measure_inductance_uh(void)
 {
 	unsigned int adc_final, adc_now, threshold;
 	unsigned long t_us = 0;
 	unsigned long max_us = 50000UL; // 50 ms timeout
 
-	// Make sure current is zero first
+	
 	pin_low(GPIOB, IND_DRIVE_PIN);
 	delay_ms(10);
 
-	// Measure final steady-state ADC value
+	
 	pin_high(GPIOB, IND_DRIVE_PIN);
 	delay_ms(10);
 	adc_final = adc_read_avg(IND_ADC_CHANNEL);
@@ -320,11 +314,11 @@ unsigned long measure_inductance_uh(void)
 
 	threshold = (unsigned int)(((unsigned long)adc_final * 632UL) / 1000UL);
 
-	// Reset again before actual timing run
+	
 	pin_low(GPIOB, IND_DRIVE_PIN);
 	delay_ms(10);
 
-	// Apply step and time until ADC reaches 63.2%
+	
 	pin_high(GPIOB, IND_DRIVE_PIN);
 
 	while(t_us < max_us)
@@ -339,7 +333,7 @@ unsigned long measure_inductance_uh(void)
 
 	if(t_us >= max_us) return 0;
 
-	// L(uH) = R(ohms) * tau(us)
+	
 	return IND_RSENSE_OHMS * t_us / 6.0;
 }
 
