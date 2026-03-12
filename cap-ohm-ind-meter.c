@@ -39,7 +39,7 @@
 #define IND_DRIVE_PIN      4
 #define IND_ADC_PIN        0
 #define IND_ADC_CHANNEL    8
-#define IND_RSENSE_OHMS    1000UL
+#define IND_RSENSE_OHMS    100UL
 
 void delay_cycles(volatile unsigned int d)
 {
@@ -340,7 +340,7 @@ unsigned long measure_inductance_uh(void)
 	if(t_us >= max_us) return 0;
 
 	// L(uH) = R(ohms) * tau(us)
-	return IND_RSENSE_OHMS * t_us;
+	return IND_RSENSE_OHMS * t_us / 6.0;
 }
 
 int main(void)
